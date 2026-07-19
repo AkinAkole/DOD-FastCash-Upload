@@ -45,8 +45,8 @@ st.markdown("""
 # ==========================================
 # Simple, robust credential mapping for authorized operations personnel
 USER_CREDENTIALS = {
-    "emmanuel": "FastCash2026!",
-    "admin": "DOD_Secure_Ops9"
+    "dod.fastcash": "FastCash2026!",
+    "admin": "Fcmb@54321"
 }
 
 def check_password():
