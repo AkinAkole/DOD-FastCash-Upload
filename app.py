@@ -1,6 +1,7 @@
 import io
 import os
 import zipfile
+from decimal import Decimal, ROUND_HALF_UP
 import openpyxl
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 import pandas as pd
@@ -15,7 +16,7 @@ st.set_page_config(
     layout="centered",
 )
 
-# Custom injection for professional typography and clean layout presentation
+# Custom CSS for high-impact metric cards
 st.markdown("""
     <style>
     .metric-card {
@@ -80,7 +81,6 @@ if check_password():
     st.caption("FastCash Upload Files Generator • Operations Hub")
     st.markdown("---")
 
-    # Logout button in the sidebar footer
     if st.sidebar.button("Log Out of Session"):
         st.session_state["authenticated"] = False
         st.rerun()
@@ -177,7 +177,7 @@ if check_password():
                     wb.remove(wb.active)  
 
                     summary_data = []
-                    all_contra_rows_sum = 0.0
+                    all_contra_rows_sum = Decimal("0.00")
                     total_processed_records = 0
 
                     for idx, chunk_df in enumerate(chunks, 1):
@@ -185,39 +185,43 @@ if check_password():
                         ws = wb.create_sheet(title=sheet_title)
 
                         processed_rows = []
-                        chunk_sum = 0.0
+                        chunk_sum = Decimal("0.00")
                         chunk_row_count = 0
 
                         for _, r in chunk_df.iterrows():
                             val_a = str(r.iloc[0]) if pd.notnull(r.iloc[0]) else ""
                             val_b = r.iloc[1] if pd.notnull(r.iloc[1]) else ""
-                            val_e = float(r[col_e_name])
+                            val_e = r[col_e_name]
                             val_f = str(r.iloc[5]) if pd.notnull(r.iloc[5]) else ""
                             val_g = r.iloc[6] if pd.notnull(r.iloc[6]) else ""
 
                             letter_a = val_a[0].upper() if val_a else ""
-                            rounded_e = round(val_e, 2)
-                            chunk_sum += rounded_e
+                            
+                            # Standard strict mathematical approximation (ROUND_HALF_UP)
+                            dec_e = Decimal(str(val_e))
+                            approximated_e = dec_e.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                            
+                            chunk_sum += approximated_e
                             chunk_row_count += 1
 
                             sanitized_val_f = val_f.replace(",", "*").replace("-", "*")
                             ref_col_f = f"{ref_prefix}E{r['_excel_row_idx']}" if inc_pos else ref_prefix
 
                             processed_rows.append([
-                                val_b, letter_a, rounded_e, sanitized_val_f, 
+                                val_b, letter_a, float(approximated_e), sanitized_val_f, 
                                 "", ref_col_f, "", "", "", val_g
                             ])
 
                         for row_data in processed_rows:
                             ws.append(row_data)
 
-                        final_chunk_sum = round(chunk_sum, 2)
+                        final_chunk_sum = chunk_sum.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
                         all_contra_rows_sum += final_chunk_sum
                         total_processed_records += chunk_row_count
 
                         contra_ref_f = f"{ref_prefix}{sheet_title}"
                         contra_row = [
-                            contra_acc, tran_type, final_chunk_sum, contra_narr,
+                            contra_acc, tran_type, float(final_chunk_sum), contra_narr,
                             "", contra_ref_f, "", "", "", ""
                         ]
                         ws.append(contra_row)
@@ -241,7 +245,7 @@ if check_password():
                         summary_data.append({
                             "Batch Identifier": sheet_title,
                             "Records": chunk_row_count,
-                            "Total Sum (₦)": final_chunk_sum
+                            "Total Sum (₦)": float(final_chunk_sum)
                         })
 
                     # ==========================================
@@ -264,13 +268,14 @@ if check_password():
                     ws_sum.cell(row=2, column=2, value="DOD FastCash Engine").font = header_font
                     ws_sum.cell(row=3, column=2, value="Executive Processing Summary Report").font = Font(name="Segoe UI", size=11, italic=True, color="4A5568")
                     
-                    # Global Metrics Panel Table in Excel
-                    net_variance = round(all_contra_rows_sum - contra_amt, 2)
+                    dec_contra_amt = Decimal(str(contra_amt))
+                    net_variance = (all_contra_rows_sum - dec_contra_amt).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                    
                     global_metrics = [
                         ("Total Actionable Data Rows Processed", total_processed_records),
-                        ("Target Global Contra Amount Inputted", contra_amt),
-                        ("Calculated Net Sum of Generated Rows", all_contra_rows_sum),
-                        ("Net Overall Variance Status", net_variance),
+                        ("Target Global Contra Amount Inputted", float(dec_contra_amt)),
+                        ("Calculated Net Sum of Generated Rows", float(all_contra_rows_sum)),
+                        ("Net Overall Variance Status", float(net_variance)),
                     ]
 
                     ws_sum.cell(row=5, column=2, value="Global Reconciliation Table").font = bold_font
@@ -290,7 +295,6 @@ if check_password():
                         if "Variance" in metric:
                             c2.font = Font(name="Segoe UI", bold=True, color="E53E3E" if val != 0 else "38A169")
 
-                    # Batch Data Log in Excel
                     start_row_breakdown = 13
                     ws_sum.cell(row=start_row_breakdown, column=2, value="Batch Data Sheet Breakdown Variance Log").font = bold_font
                     
@@ -335,25 +339,22 @@ if check_password():
                     zip_buffer.seek(0)
                     
                     # ==========================================
-                    # 2. BEAUTIFIED WEB UI REPORTING LAYER
+                    # WEB UI DASHBOARD DISPLAY
                     # ==========================================
                     st.success("🏁 Verification complete! Production packages built successfully.")
-                    
                     st.subheader("📊 Reconciliation Executive Dashboard")
                     
-                    # High-Impact Top-Level Metric Cards via Column Grids
                     m_col1, m_col2, m_col3 = st.columns(3)
                     with m_col1:
                         st.markdown(f'<div class="metric-card"><div class="metric-label">Total Records</div><div class="metric-value">{total_processed_records:,}</div></div>', unsafe_allow_html=True)
                     with m_col2:
-                        st.markdown(f'<div class="metric-card"><div class="metric-label">Processed Sum</div><div class="metric-value">₦{all_contra_rows_sum:,.2f}</div></div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="metric-card"><div class="metric-label">Processed Sum</div><div class="metric-value">₦{float(all_contra_rows_sum):,.2f}</div></div>', unsafe_allow_html=True)
                     with m_col3:
                         var_color = "#38A169" if net_variance == 0 else "#E53E3E"
-                        st.markdown(f'<div class="metric-card"><div class="metric-label">Net Variance</div><div class="metric-value" style="color: {var_color};">₦{net_variance:,.2f}</div></div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="metric-card"><div class="metric-label">Net Variance</div><div class="metric-value" style="color: {var_color};">₦{float(net_variance):,.2f}</div></div>', unsafe_allow_html=True)
                     
                     st.markdown("<br>", unsafe_allow_html=True)
                     
-                    # Streamlit Native Dynamic Bar Charting Layout for Individual Batch Loads
                     st.markdown("**Batch Allocation Matrix Breakdown**")
                     summary_df = pd.DataFrame(summary_data)
                     st.bar_chart(
@@ -364,7 +365,6 @@ if check_password():
                         use_container_width=True
                     )
                     
-                    # Structured Clean Data Table Representation Below the Chart
                     st.dataframe(
                         summary_df.style.format({"Total Sum (₦)": "₦{:,.2f}", "Records": "{:,}"}),
                         use_container_width=True,
@@ -373,7 +373,6 @@ if check_password():
 
                     st.markdown("---")
                     
-                    # Prominent Download Call-To-Action Layout
                     st.download_button(
                         label="📥 Download Output Package (.ZIP)",
                         data=zip_buffer,
