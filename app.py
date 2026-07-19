@@ -57,7 +57,7 @@ def check_password():
     if st.session_state["authenticated"]:
         return True
 
-    st.sidebar.title("🔐 Security Authentication")
+    st.sidebar.title("🔐 DOD FastCash Engine Security Authentication")
     st.sidebar.info("Please enter your operational credentials to unlock the engine processing layer.")
     
     username = st.sidebar.text_input("Username", key="auth_user")
