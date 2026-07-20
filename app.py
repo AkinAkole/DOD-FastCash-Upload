@@ -1,5 +1,6 @@
 import io
 import os
+import re
 import zipfile
 from decimal import Decimal, ROUND_HALF_UP
 import openpyxl
@@ -44,7 +45,6 @@ st.markdown("""
 # ==========================================
 # 1. SECURITY & ACCESS CONTROL LAYER
 # ==========================================
-# Simple, robust credential mapping for authorized operations personnel
 USER_CREDENTIALS = {
     "dod.fastcash": "FastCash2026!",
     "admin": "Fcmb@54321"
@@ -150,27 +150,48 @@ if check_password():
                         st.error("❌ No valid rows found containing numeric elements in Column E.")
                         st.stop()
 
-                    # Chunking Logic (Threshold: 7999 rows OR 500,000,000 value sum)
-                    chunks = []
-                    current_chunk = []
-                    current_rows = 0
-                    current_sum = 0.0
+                    # Separate Zero/Negative Rows after rounding approximation
+                    positive_rows = []
+                    zero_neg_rows = []
 
                     for _, row in df_filtered.iterrows():
                         val_e = float(row[col_e_name])
-                        if (current_rows + 1 > 7999) or (current_sum + val_e >= 500000000):
-                            if current_chunk:
-                                chunks.append(pd.DataFrame(current_chunk))
-                            current_chunk = [row]
-                            current_rows = 1
-                            current_sum = val_e
-                        else:
-                            current_chunk.append(row)
-                            current_rows += 1
-                            current_sum += val_e
+                        dec_e = Decimal(str(val_e))
+                        approximated_e = dec_e.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                        
+                        row_dict = row.to_dict()
+                        row_dict["_approximated_e"] = approximated_e
 
-                    if current_chunk:
-                        chunks.append(pd.DataFrame(current_chunk))
+                        if approximated_e <= Decimal("0.00"):
+                            zero_neg_rows.append(row_dict)
+                        else:
+                            positive_rows.append(row_dict)
+
+                    df_positive = pd.DataFrame(positive_rows)
+                    df_zero_neg = pd.DataFrame(zero_neg_rows)
+
+                    # Chunking Logic for Positive Rows (Threshold: 7999 rows OR 500,000,000 value sum)
+                    chunks = []
+                    current_chunk = []
+                    current_rows = 0
+                    current_sum = Decimal("0.00")
+
+                    if not df_positive.empty:
+                        for _, row in df_positive.iterrows():
+                            val_e_dec = row["_approximated_e"]
+                            if (current_rows + 1 > 7999) or (current_sum + val_e_dec >= Decimal("500000000.00")):
+                                if current_chunk:
+                                    chunks.append(pd.DataFrame(current_chunk))
+                                current_chunk = [row]
+                                current_rows = 1
+                                current_sum = val_e_dec
+                            else:
+                                current_chunk.append(row)
+                                current_rows += 1
+                                current_sum += val_e_dec
+
+                        if current_chunk:
+                            chunks.append(pd.DataFrame(current_chunk))
 
                     csv_buffers = {}
                     wb = openpyxl.Workbook()
@@ -180,6 +201,10 @@ if check_password():
                     all_contra_rows_sum = Decimal("0.00")
                     total_processed_records = 0
 
+                    # ADJUSTMENT 3: Sanitize Column D for added Contra Row
+                    sanitized_contra_narr = contra_narr.replace(",", "*").replace("-", "*")
+
+                    # Process Standard Positive Chunks
                     for idx, chunk_df in enumerate(chunks, 1):
                         sheet_title = f"{out_sheet_name} {idx}"
                         ws = wb.create_sheet(title=sheet_title)
@@ -191,15 +216,11 @@ if check_password():
                         for _, r in chunk_df.iterrows():
                             val_a = str(r.iloc[0]) if pd.notnull(r.iloc[0]) else ""
                             val_b = r.iloc[1] if pd.notnull(r.iloc[1]) else ""
-                            val_e = r[col_e_name]
+                            approximated_e = r["_approximated_e"]
                             val_f = str(r.iloc[5]) if pd.notnull(r.iloc[5]) else ""
                             val_g = r.iloc[6] if pd.notnull(r.iloc[6]) else ""
 
                             letter_a = val_a[0].upper() if val_a else ""
-                            
-                            # Standard strict mathematical approximation (ROUND_HALF_UP)
-                            dec_e = Decimal(str(val_e))
-                            approximated_e = dec_e.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
                             
                             chunk_sum += approximated_e
                             chunk_row_count += 1
@@ -207,9 +228,16 @@ if check_password():
                             sanitized_val_f = val_f.replace(",", "*").replace("-", "*")
                             ref_col_f = f"{ref_prefix}E{r['_excel_row_idx']}" if inc_pos else ref_prefix
 
+                            # ADJUSTMENT 4: Truncate Col J if 'A' + 3 digits
+                            val_g_str = str(val_g) if pd.notnull(val_g) else ""
+                            if re.match(r"^A\d{3}", val_g_str, re.IGNORECASE):
+                                val_g_final = val_g_str[:4]
+                            else:
+                                val_g_final = val_g
+
                             processed_rows.append([
                                 val_b, letter_a, float(approximated_e), sanitized_val_f, 
-                                "", ref_col_f, "", "", "", val_g
+                                "", ref_col_f, "", "", "", val_g_final
                             ])
 
                         for row_data in processed_rows:
@@ -221,7 +249,7 @@ if check_password():
 
                         contra_ref_f = f"{ref_prefix}{sheet_title}"
                         contra_row = [
-                            contra_acc, tran_type, float(final_chunk_sum), contra_narr,
+                            contra_acc, tran_type, float(final_chunk_sum), sanitized_contra_narr,
                             "", contra_ref_f, "", "", "", ""
                         ]
                         ws.append(contra_row)
@@ -248,9 +276,69 @@ if check_password():
                             "Total Sum (₦)": float(final_chunk_sum)
                         })
 
-                    # ==========================================
-                    # EXECUTIVE SUMMARY COMPLIANCE REPORT (EXCEL)
-                    # ==========================================
+                    # ADJUSTMENT 1: Build Zero / Negative Rows Sheet
+                    zero_neg_records_count = 0
+                    zero_neg_total_sum = Decimal("0.00")
+
+                    if not df_zero_neg.empty:
+                        sheet_title_zn = "Zero_Negative_Rows"
+                        ws_zn = wb.create_sheet(title=sheet_title_zn)
+                        
+                        zn_processed_rows = []
+                        for _, r in df_zero_neg.iterrows():
+                            val_a = str(r.iloc[0]) if pd.notnull(r.iloc[0]) else ""
+                            val_b = r.iloc[1] if pd.notnull(r.iloc[1]) else ""
+                            approximated_e = r["_approximated_e"]
+                            val_f = str(r.iloc[5]) if pd.notnull(r.iloc[5]) else ""
+                            val_g = r.iloc[6] if pd.notnull(r.iloc[6]) else ""
+
+                            letter_a = val_a[0].upper() if val_a else ""
+                            zero_neg_total_sum += approximated_e
+                            zero_neg_records_count += 1
+
+                            sanitized_val_f = val_f.replace(",", "*").replace("-", "*")
+                            ref_col_f = f"{ref_prefix}E{r['_excel_row_idx']}" if inc_pos else ref_prefix
+
+                            # ADJUSTMENT 4: Truncate Col J
+                            val_g_str = str(val_g) if pd.notnull(val_g) else ""
+                            if re.match(r"^A\d{3}", val_g_str, re.IGNORECASE):
+                                val_g_final = val_g_str[:4]
+                            else:
+                                val_g_final = val_g
+
+                            zn_processed_rows.append([
+                                val_b, letter_a, float(approximated_e), sanitized_val_f, 
+                                "", ref_col_f, "", "", "", val_g_final
+                            ])
+
+                        for row_data in zn_processed_rows:
+                            ws_zn.append(row_data)
+
+                        final_zn_sum = zero_neg_total_sum.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                        contra_ref_f_zn = f"{ref_prefix}{sheet_title_zn}"
+                        contra_row_zn = [
+                            contra_acc, tran_type, float(final_zn_sum), sanitized_contra_narr,
+                            "", contra_ref_f_zn, "", "", "", ""
+                        ]
+                        ws_zn.append(contra_row_zn)
+
+                        all_zn_sheet_rows = zn_processed_rows + [contra_row_zn]
+                        csv_df_zn = pd.DataFrame(all_zn_sheet_rows)
+                        csv_text_buffer_zn = io.StringIO()
+                        csv_df_zn.to_csv(csv_text_buffer_zn, index=False, header=False)
+                        csv_buffers[f"{sheet_title_zn}.csv"] = csv_text_buffer_zn.getvalue()
+
+                        for row in ws_zn.iter_rows(min_row=1, max_row=ws_zn.max_row, min_col=1, max_col=10):
+                            row[2].number_format = "#,##0.00"
+
+                        last_row_idx_zn = ws_zn.max_row
+                        accent_fill_zn = PatternFill(start_color="FFF5F5", end_color="FFF5F5", fill_type="solid")
+                        for col_idx in range(1, 11):
+                            cell = ws_zn.cell(row=last_row_idx_zn, column=col_idx)
+                            cell.font = Font(bold=True, color="C53030")
+                            cell.fill = accent_fill_zn
+
+                    # ADJUSTMENT 2: EXECUTIVE SUMMARY COMPLIANCE REPORT (EXCEL)
                     ws_sum = wb.create_sheet(title="Executive Summary", index=0)
                     ws_sum.views.sheetView[0].showGridLines = True
 
@@ -272,10 +360,12 @@ if check_password():
                     net_variance = (all_contra_rows_sum - dec_contra_amt).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
                     
                     global_metrics = [
-                        ("Total Actionable Data Rows Processed", total_processed_records),
+                        ("Total Actionable Positive Rows Processed", total_processed_records),
+                        ("Zero/Negative Rows Segregated", zero_neg_records_count),
                         ("Target Global Contra Amount Inputted", float(dec_contra_amt)),
-                        ("Calculated Net Sum of Generated Rows", float(all_contra_rows_sum)),
-                        ("Net Overall Variance Status", float(net_variance)),
+                        ("Calculated Net Sum of Positive Batches", float(all_contra_rows_sum)),
+                        ("Cumulative Sum of Zero/Negative Rows", float(zero_neg_total_sum)),
+                        ("Net Overall Variance Status (Positive vs Target)", float(net_variance)),
                     ]
 
                     ws_sum.cell(row=5, column=2, value="Global Reconciliation Table").font = bold_font
@@ -295,7 +385,7 @@ if check_password():
                         if "Variance" in metric:
                             c2.font = Font(name="Segoe UI", bold=True, color="E53E3E" if val != 0 else "38A169")
 
-                    start_row_breakdown = 13
+                    start_row_breakdown = 15
                     ws_sum.cell(row=start_row_breakdown, column=2, value="Batch Data Sheet Breakdown Variance Log").font = bold_font
                     
                     headers_breakdown = ["Output Sheet Identifier", "Data Row Count", "Imported Rows Sum", "Created Contra Row", "Variance Verification"]
@@ -318,6 +408,20 @@ if check_password():
                             c.number_format = "#,##0" if idx == 1 else "#,##0.00"
                             c.border = thin_border
                         curr_row += 1
+
+                    # Add Special Zero/Negative Sheet to Breakdown Log
+                    if zero_neg_records_count > 0:
+                        zn_cells = [
+                            ws_sum.cell(row=curr_row, column=2, value="Zero_Negative_Rows"),
+                            ws_sum.cell(row=curr_row, column=3, value=zero_neg_records_count),
+                            ws_sum.cell(row=curr_row, column=4, value=float(zero_neg_total_sum)),
+                            ws_sum.cell(row=curr_row, column=5, value=float(zero_neg_total_sum)),
+                            ws_sum.cell(row=curr_row, column=6, value=0.0),
+                        ]
+                        for idx, c in enumerate(zn_cells):
+                            c.font = Font(name="Segoe UI", size=11, bold=True, color="C53030")
+                            c.number_format = "#,##0" if idx == 1 else "#,##0.00"
+                            c.border = thin_border
 
                     for ws_obj in wb.worksheets:
                         for col in ws_obj.columns:
@@ -346,13 +450,16 @@ if check_password():
                     
                     m_col1, m_col2, m_col3 = st.columns(3)
                     with m_col1:
-                        st.markdown(f'<div class="metric-card"><div class="metric-label">Total Records</div><div class="metric-value">{total_processed_records:,}</div></div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="metric-card"><div class="metric-label">Positive Records</div><div class="metric-value">{total_processed_records:,}</div></div>', unsafe_allow_html=True)
                     with m_col2:
                         st.markdown(f'<div class="metric-card"><div class="metric-label">Processed Sum</div><div class="metric-value">₦{float(all_contra_rows_sum):,.2f}</div></div>', unsafe_allow_html=True)
                     with m_col3:
                         var_color = "#38A169" if net_variance == 0 else "#E53E3E"
                         st.markdown(f'<div class="metric-card"><div class="metric-label">Net Variance</div><div class="metric-value" style="color: {var_color};">₦{float(net_variance):,.2f}</div></div>', unsafe_allow_html=True)
                     
+                    if zero_neg_records_count > 0:
+                        st.warning(f"⚠️ **{zero_neg_records_count}** row(s) with value ≤ ₦0.00 isolated in **Zero_Negative_Rows** sheet (Total: ₦{float(zero_neg_total_sum):,.2f}).")
+
                     st.markdown("<br>", unsafe_allow_html=True)
                     
                     st.markdown("**Batch Allocation Matrix Breakdown**")
