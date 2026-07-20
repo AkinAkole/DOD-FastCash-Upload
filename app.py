@@ -201,7 +201,7 @@ if check_password():
                     all_contra_rows_sum = Decimal("0.00")
                     total_processed_records = 0
 
-                    # ADJUSTMENT 3: Sanitize Column D for added Contra Row
+                    # Sanitize Column D for added Contra Row
                     sanitized_contra_narr = contra_narr.replace(",", "*").replace("-", "*")
 
                     # Process Standard Positive Chunks
@@ -218,7 +218,7 @@ if check_password():
                             val_b = r.iloc[1] if pd.notnull(r.iloc[1]) else ""
                             approximated_e = r["_approximated_e"]
                             val_f = str(r.iloc[5]) if pd.notnull(r.iloc[5]) else ""
-                            val_g = r.iloc[6] if pd.notnull(r.iloc[6]) else ""
+                            val_g_raw = r.iloc[6] if pd.notnull(r.iloc[6]) else ""
 
                             letter_a = val_a[0].upper() if val_a else ""
                             
@@ -228,16 +228,16 @@ if check_password():
                             sanitized_val_f = val_f.replace(",", "*").replace("-", "*")
                             ref_col_f = f"{ref_prefix}E{r['_excel_row_idx']}" if inc_pos else ref_prefix
 
-                            # ADJUSTMENT 4: Truncate Col J if 'A' + 3 digits
-                            val_g_str = str(val_g) if pd.notnull(val_g) else ""
+                            # TRUNCATION FIX FOR COLUMN G -> COLUMN J
+                            val_g_str = str(val_g_raw).strip()
                             if re.match(r"^A\d{3}", val_g_str, re.IGNORECASE):
-                                val_g_final = val_g_str[:4]
+                                val_j_final = val_g_str[:4]
                             else:
-                                val_g_final = val_g
+                                val_j_final = val_g_raw
 
                             processed_rows.append([
                                 val_b, letter_a, float(approximated_e), sanitized_val_f, 
-                                "", ref_col_f, "", "", "", val_g_final
+                                "", ref_col_f, "", "", "", val_j_final
                             ])
 
                         for row_data in processed_rows:
@@ -276,7 +276,7 @@ if check_password():
                             "Total Sum (₦)": float(final_chunk_sum)
                         })
 
-                    # ADJUSTMENT 1: Build Zero / Negative Rows Sheet
+                    # Build Zero / Negative Rows Sheet
                     zero_neg_records_count = 0
                     zero_neg_total_sum = Decimal("0.00")
 
@@ -290,7 +290,7 @@ if check_password():
                             val_b = r.iloc[1] if pd.notnull(r.iloc[1]) else ""
                             approximated_e = r["_approximated_e"]
                             val_f = str(r.iloc[5]) if pd.notnull(r.iloc[5]) else ""
-                            val_g = r.iloc[6] if pd.notnull(r.iloc[6]) else ""
+                            val_g_raw = r.iloc[6] if pd.notnull(r.iloc[6]) else ""
 
                             letter_a = val_a[0].upper() if val_a else ""
                             zero_neg_total_sum += approximated_e
@@ -299,16 +299,16 @@ if check_password():
                             sanitized_val_f = val_f.replace(",", "*").replace("-", "*")
                             ref_col_f = f"{ref_prefix}E{r['_excel_row_idx']}" if inc_pos else ref_prefix
 
-                            # ADJUSTMENT 4: Truncate Col J
-                            val_g_str = str(val_g) if pd.notnull(val_g) else ""
+                            # TRUNCATION FIX FOR COLUMN G -> COLUMN J
+                            val_g_str = str(val_g_raw).strip()
                             if re.match(r"^A\d{3}", val_g_str, re.IGNORECASE):
-                                val_g_final = val_g_str[:4]
+                                val_j_final = val_g_str[:4]
                             else:
-                                val_g_final = val_g
+                                val_j_final = val_g_raw
 
                             zn_processed_rows.append([
                                 val_b, letter_a, float(approximated_e), sanitized_val_f, 
-                                "", ref_col_f, "", "", "", val_g_final
+                                "", ref_col_f, "", "", "", val_j_final
                             ])
 
                         for row_data in zn_processed_rows:
@@ -338,7 +338,7 @@ if check_password():
                             cell.font = Font(bold=True, color="C53030")
                             cell.fill = accent_fill_zn
 
-                    # ADJUSTMENT 2: EXECUTIVE SUMMARY COMPLIANCE REPORT (EXCEL)
+                    # EXECUTIVE SUMMARY COMPLIANCE REPORT (EXCEL)
                     ws_sum = wb.create_sheet(title="Executive Summary", index=0)
                     ws_sum.views.sheetView[0].showGridLines = True
 
