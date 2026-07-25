@@ -92,8 +92,8 @@ if check_password():
 
     start_row_num = st.sidebar.number_input(
         "Start Data Row (Excel Row Number):",
-        min_value=2,
-        value=2,
+        min_value=1,
+        value=1,
         step=1,
         help="Excel row index where data processing begins. Rows before this index are completely excluded."
     )
