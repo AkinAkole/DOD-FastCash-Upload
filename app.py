@@ -90,6 +90,13 @@ if check_password():
     # ==========================================
     st.sidebar.header("Processing Parameters")
 
+    start_row_num = st.sidebar.number_input(
+        "Start Data Row (Excel Row Number):",
+        min_value=2,
+        value=2,
+        step=1,
+        help="Excel row index where data processing begins. Rows before this index are completely excluded."
+    )
     contra_acc = st.sidebar.text_input(
         "Contra Account:", placeholder="Alphanumeric account code"
     )
@@ -140,14 +147,22 @@ if check_password():
                     else:
                         df_in = pd.read_excel(file_source, sheet_name=0)
                     
+                    # Track exact original Excel row index (assuming Row 1 is header)
                     df_in["_excel_row_idx"] = df_in.index + 2
+                    
+                    # EXCLUSION STEP: Slice dataset to drop rows prior to specified Excel start row
+                    df_in = df_in[df_in["_excel_row_idx"] >= start_row_num].copy()
+
+                    if df_in.empty:
+                        st.error(f"❌ No rows found starting from Excel Row {start_row_num}.")
+                        st.stop()
                     
                     col_e_name = df_in.columns[4]
                     df_in[col_e_name] = pd.to_numeric(df_in[col_e_name], errors="coerce")
                     df_filtered = df_in.dropna(subset=[col_e_name]).copy()
 
                     if df_filtered.empty:
-                        st.error("❌ No valid rows found containing numeric elements in Column E.")
+                        st.error("❌ No valid rows found containing numeric elements in Column E within the selected range.")
                         st.stop()
 
                     # Separate Zero/Negative Rows after rounding approximation
@@ -360,6 +375,7 @@ if check_password():
                     net_variance = (all_contra_rows_sum - dec_contra_amt).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
                     
                     global_metrics = [
+                        ("Start Row Filter Index Applied", start_row_num),
                         ("Total Actionable Positive Rows Processed", total_processed_records),
                         ("Zero/Negative Rows Segregated", zero_neg_records_count),
                         ("Target Global Contra Amount Inputted", float(dec_contra_amt)),
@@ -385,7 +401,7 @@ if check_password():
                         if "Variance" in metric:
                             c2.font = Font(name="Segoe UI", bold=True, color="E53E3E" if val != 0 else "38A169")
 
-                    start_row_breakdown = 15
+                    start_row_breakdown = 16
                     ws_sum.cell(row=start_row_breakdown, column=2, value="Batch Data Sheet Breakdown Variance Log").font = bold_font
                     
                     headers_breakdown = ["Output Sheet Identifier", "Data Row Count", "Imported Rows Sum", "Created Contra Row", "Variance Verification"]
@@ -446,6 +462,7 @@ if check_password():
                     # WEB UI DASHBOARD DISPLAY
                     # ==========================================
                     st.success("🏁 Verification complete! Production packages built successfully.")
+                    st.info(f"📌 Filter Applied: Data processing commenced from Excel Row **{start_row_num}**.")
                     st.subheader("📊 Reconciliation Executive Dashboard")
                     
                     m_col1, m_col2, m_col3 = st.columns(3)
